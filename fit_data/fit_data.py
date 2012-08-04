@@ -46,4 +46,4 @@ def linear_fit(x, y, plot=False):
         
         plt.show()
     
-    return slope, intercept
+    return slope(), intercept()
