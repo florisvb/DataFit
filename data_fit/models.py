@@ -15,23 +15,21 @@ import floris_plot_lib as fpl
 
 
 class ModelBase(object):
-    def __init__(self, parameters):
-        self.parameters = parameters
                 
     def set_parameters(self, parameter_names, parameter_values):
         for i, name in enumerate(parameter_names):
             self.parameters[name] = parameter_values[i]
 
     def get_errors(self, data, x):
-        print np.sum( (data - self.get_val(x))**2 )
-        print data.shape, self.get_val(x).shape
+        #print np.sum( (data - self.get_val(x))**2 )
+        #print data.shape, self.get_val(x).shape
         return data - self.get_val(x)
         
     def fit(self, data, inputs, plot=False, method='optimize'):
     
         # Iterative Optimization Method
         if method == 'optimize':
-            print 'Fitting Linear Model with: scipy.optimize.leastsq'
+            #print 'Fitting Linear Model with: scipy.optimize.leastsq'
             def f(parameter_values, parameter_names):
                 self.set_parameters(parameter_names, parameter_values)
                 return self.get_errors(data, inputs)
@@ -46,7 +44,7 @@ class ModelBase(object):
         # Linear Algebra Method            
         elif method == 'linear':
             x = inputs
-            print 'Fitting Linear Model with: scipy.linalg.lstsq'
+            #print 'Fitting Linear Model with: scipy.linalg.lstsq'
             n_inputs = 2
             n_outputs = 1
             
@@ -85,6 +83,7 @@ class ModelBase(object):
             
     
     def plot(self, inputs):
+        
         if type(inputs) is list:
             deg = len(inputs)
         else:
@@ -97,15 +96,19 @@ class ModelBase(object):
             ax.plot(inputs, vals, 'r.')
         
         elif deg == 2:
-            pass            
+            pass        
+            
             
 ###############################################################################################################
 # Linear Models
 ###############################################################################################################
 
 class LinearModel(ModelBase):
-    def __init__(self, parameters={'slope': 8, 'intercept': 0}):
-        self.parameters = parameters
+    def __init__(self, parameters=None):
+        if parameters is None:
+            self.parameters = {'slope': 8, 'intercept': 0}
+        else:
+            self.parameters = parameters
                 
     def get_val(self, x):
         if type(x) is list:
@@ -182,8 +185,8 @@ class GaussianModel2D(GaussianModelND):
         inputs = [x, y]
         
 
-        print data.shape
-        print x.shape, y.shape
+        #print data.shape
+        #print x.shape, y.shape
         
         self.fit(data, inputs, plot=plot, method=method)
         
@@ -193,6 +196,12 @@ class GaussianModel2D(GaussianModelND):
         inputs = [x,y]
         extent = [np.min(x), np.max(x), np.min(y), np.max(y)]
         return self.get_val(inputs), extent
+        
+    def show(self, xlim=[0,1], ylim=[0,1], resolution=0.01):
+        im, extent = self.get_array_2d(xlim, ylim, resolution)
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.imshow(im, extent=extent)
             
         
 ######################################################################################
@@ -208,34 +217,84 @@ class GaussianModelND_TimeVarying(ModelBase):
         if parameters is None:
             parameters = {'magnitude': 1}
             for n in range(self.dim):
-                mean_intercept_key = 'mean_intercept_' + str(n)
-                mean_slope_key = 'mean_slope_' + str(n)
-                std_intercept_key = 'std_intercept_' + str(n)
-                std_slope_key = 'std_slope_' + str(n)
+                mean_intercept_key = 'mean_' + str(n) + '_intercept'
+                mean_slope_key = 'mean_' + str(n) + '_slope'
+                std_intercept_key = 'std_' + str(n) + '_intercept'
+                std_slope_key = 'std_' + str(n) + '_slope'
                 keys = [mean_intercept_key, mean_slope_key, std_intercept_key, std_slope_key]
                 vals = [0, .1, 1, .5]
                 for i, key in enumerate(keys):
                     parameters.setdefault(key, vals[i])
         self.parameters = parameters
                         
-    def get_val(self, t, inputs):
+    def get_val(self, inputs):
         if type(inputs) is not list:
             inputs = [inputs]
         magnitude = self.parameters['magnitude']
         gauss_terms = []
+        t = inputs[0]
+        inputs = inputs[1]
         for n in range(self.dim):
-            mean_intercept_key = 'mean_intercept_' + str(n)
-            mean_slope_key = 'mean_slope_' + str(n)
-            std_intercept_key = 'std_intercept_' + str(n)
-            std_slope_key = 'std_slope_' + str(n)
+            mean_intercept_key = 'mean_' + str(n) + '_intercept'
+            mean_slope_key = 'mean_' + str(n) + '_slope'
+            std_intercept_key = 'std_' + str(n) + '_intercept'
+            std_slope_key = 'std_' + str(n) + '_slope'
         
             mean = self.parameters[mean_intercept_key] + self.parameters[mean_slope_key]*t
             std = self.parameters[std_intercept_key] + self.parameters[std_slope_key]*t
 
-            gauss_term = (0.5*(inputs[n] - mean)/std)**2
+            gauss_term = (0.5*(inputs[n] - mean)/std)**2 # note n-1 to account for time variable
             gauss_terms.append(gauss_term)
         val = magnitude*np.exp(-1*sum(gauss_terms))
         return val
+        
+    def fit(self, timestamps, data, inputs):
+        # inputs should not be time varying
+        # data should be a list of the data at different timepoints
+        
+        gm_list = []
+        for i, t in enumerate(timestamps):
+            gm = GaussianModel2D()
+            gm.fit(data[i], inputs)
+            gm_list.append(gm)
+            
+        parameter_dict = {}
+        time_indep_parameter_dict = {}
+        for key in self.parameters.keys():
+            if '_slope' in key:
+                s = key.rstrip('_slope')
+                parameter_dict.setdefault(s,np.zeros_like(timestamps)) 
+            elif '_slope' not in key and '_intercept' not in key:
+                time_indep_parameter_dict.setdefault(key,np.zeros_like(timestamps)) 
+            
+        for i, gm in enumerate(gm_list):
+            for key, parameter in parameter_dict.items():
+                parameter[i] = gm.parameters[key]
+            for key, parameter in time_indep_parameter_dict.items():
+                parameter[i] = gm.parameters[key]
+                
+        # fix absolute values
+        for key, parameter in parameter_dict.items():
+            if 'std' in key:
+                print key
+                parameter_dict[key] = np.abs(parameter)
+                
+        # now make some linear models
+        lm_dict = {}
+        for key, parameter in parameter_dict.items():
+            lm = LinearModel()
+            lm.fit(parameter, timestamps)
+            lm_dict.setdefault(key, lm)
+        
+        for key, lm in lm_dict.items():
+            key_slope = key + '_slope'
+            self.parameters[key_slope] = lm.parameters['slope']
+            key_slope = key + '_intercept'
+            self.parameters[key_slope] = lm.parameters['intercept']
+        
+        # time independent parameters
+        for key, parameter in time_indep_parameter_dict.items():
+            self.parameters[key] = np.mean(parameter) 
         
 class GaussianModel2D_TimeVarying(GaussianModelND_TimeVarying):
     def __init__(self, parameters=None):
@@ -245,9 +304,9 @@ class GaussianModel2D_TimeVarying(GaussianModelND_TimeVarying):
     def get_array_2d(self, t, xlim, ylim, resolution):
         x = np.arange(xlim[0], xlim[1], resolution, np.float32)
         y = np.arange(ylim[0], ylim[1], resolution, np.float32)[:,np.newaxis]
-        inputs = [x,y]
+        inputs = [t,[x,y]]
         extent = [np.min(x), np.max(x), np.min(y), np.max(y)]
-        return self.get_val(t, inputs), extent
+        return self.get_val(inputs), extent
         
             
 ###
@@ -324,14 +383,14 @@ def example_gaussianmodel2d_timevarying_movie(gm=None):
 
     if gm is None:
     
-        parameters = {  'mean_intercept_0': 0,
-                        'mean_slope_0':     .2,
-                        'mean_intercept_1': 0.16,
-                        'mean_slope_1':     0,
-                        'std_intercept_0':  0.2,
-                        'std_slope_0':      0.05,
-                        'std_intercept_1':  0.05,
-                        'std_slope_1':      0.02,
+        parameters = {  'mean_0_intercept': 0,
+                        'mean_0_slope':     .2,
+                        'mean_1_intercept': 0.16,
+                        'mean_1_slope':     0,
+                        'std_0_intercept':  0.2,
+                        'std_0_slope':      0.05,
+                        'std_1_intercept':  0.05,
+                        'std_1_slope':      0.02,
                         'magnitude':        1,
                         }
         gm = GaussianModel2D_TimeVarying(parameters=parameters)
