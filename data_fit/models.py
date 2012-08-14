@@ -7,6 +7,7 @@ import scipy
 import scipy.linalg
 from scipy import optimize
 
+import ransac as ransac
 
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -20,19 +21,40 @@ class ModelBase(object):
         for i, name in enumerate(parameter_names):
             self.parameters[name] = parameter_values[i]
 
-    def get_errors(self, data, x):
-        #print np.sum( (data - self.get_val(x))**2 )
-        #print data.shape, self.get_val(x).shape
-        return data - self.get_val(x)
+    def get_errors(self, data, inputs=None, parameters=None):
+        if parameters is not None:
+            self.parameters = parameters
+        if inputs is None:
+            inputs = [data[:,1:]] #.reshape(1, len(data)) for i in range(1, data.shape[1])
+            data = data[:,0]#.reshape(1, len(data))
         
-    def fit(self, data, inputs, plot=False, method='optimize'):
-    
+        if len(data.shape) == 2:
+            data = data.reshape(len(data))
+        
+        for i, inp in enumerate(inputs):
+            if len(inp.shape) == 2:
+                inputs[i] = inp.reshape(len(inp))
+        
+        ans = data - self.get_val(inputs)
+        if len(ans.shape) == 2:
+            ans = ans.reshape(np.max(ans.shape))
+        return ans
+        
+    def fit(self, data, inputs=None, plot=False, method='optimize'):
+        
+        if inputs is None:
+            inputs = [data[:,i].reshape(len(data)) for i in range(1, data.shape[1])]
+            data = data[:,0].reshape(len(data))
+            
         # Iterative Optimization Method
         if method == 'optimize':
             #print 'Fitting Linear Model with: scipy.optimize.leastsq'
             def f(parameter_values, parameter_names):
                 self.set_parameters(parameter_names, parameter_values)
-                return self.get_errors(data, inputs)
+                ans = self.get_errors(data, inputs)
+                if len(ans.shape) == 2 and ans.shape[0] == 1:
+                    ans = ans.reshape(ans.shape[1])
+                return ans
             
             parameter_values = []
             parameter_names = []
@@ -81,6 +103,23 @@ class ModelBase(object):
         else:
             raise ValueError('Method type not recognized, choices are: optimize, linear')
             
+        return self.parameters
+            
+    def ransac(self, data, inputs=None, parameters=None, min_data_vals=50, max_iterations=10, threshold=2e3, num_vals_req=100):
+        if inputs is None:
+            inputs = data[1:,:]
+            data = data[0,:]
+        data = np.vstack((data, inputs)).T
+        
+        if parameters is None:
+            parameters = self.parameters
+        ransac_fit = ransac.ransac(data,self,min_data_vals, max_iterations, threshold, num_vals_req,debug=False,return_all=False)
+        
+        print 'ransac fit: ', ransac_fit
+        self.parameters = ransac_fit
+        
+        return self.parameters
+    
     
     def plot(self, inputs):
         
@@ -276,7 +315,6 @@ class GaussianModelND_TimeVarying(ModelBase):
         # fix absolute values
         for key, parameter in parameter_dict.items():
             if 'std' in key:
-                print key
                 parameter_dict[key] = np.abs(parameter)
                 
         # now make some linear models
@@ -343,7 +381,19 @@ def example_linearmodel_fit(method='optimize'):
     return linearmodel
     
     
+###
+
+def example_linear_ransac():
+    n_pts = 1000
     
+    x = np.random.random(n_pts)
+    noise = np.random.random(n_pts)
+    y = x*10 + noise + np.random.random(1)
+    
+    linearmodel = LinearModel()
+    ransac_fit = linearmodel.ransac(y,x,min_data_vals=50, max_iterations=10, threshold=2e3, num_vals_req=500)
+    
+    return ransac_fit, linearmodel
 ###
 
 def example_gaussianmodel1d_fit():
