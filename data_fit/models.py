@@ -9,6 +9,7 @@ from scipy import optimize
 
 import ransac as ransac
 
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
@@ -41,7 +42,10 @@ class ModelBase(object):
         return ans
         
     def fit(self, data, inputs=None, plot=False, method='optimize', ignore_parameter_names=[]):
-    
+        
+        self.data = data
+        self.inputs = inputs
+        
         if inputs is None:
             inputs = [data[:,i].reshape(len(data)) for i in range(1, data.shape[1])]
             data = data[:,0].reshape(len(data))
@@ -143,7 +147,12 @@ class ModelBase(object):
             elif deg == 2:
                 pass        
                 
-    def show_fit(self, data=None, inputs=None, ax=None, lims=[], resolution=0.001):
+    def show_fit(self, data=None, inputs=None, ax=None, lims=[], resolution=0.001, colornorm=None, colormap='jet', axis_slice=0, axis=2, n_inputs_to_show=50, axis_slice_threshold=0.01):
+        
+        if data is None:
+            data = self.data
+        if inputs is None:
+            inputs = self.inputs
         
         if inputs is not None:
             if type(inputs) is not list: inputs = [inputs]
@@ -178,16 +187,82 @@ class ModelBase(object):
             if lims is None:
                 xlim = [np.min(inputs[0]), np.max(inputs[0])]
                 ylim = [np.min(inputs[1]), np.max(inputs[1])]
-            
+            else:
+                xlim = lims[0]
+                ylim = lims[1]
+                
             im, extent = self.get_array_2d(xlim, ylim, resolution)
-            ax.imshow(im, extent=extent, origin='lower')
             
-            if inputs is not None:
-                for i in range(len(inputs[0])):
+            if colornorm is None:
+                norm = matplotlib.colors.Normalize(np.min(im), np.max(im))
+            else:
+                norm = matplotlib.colors.Normalize(colornorm[0], colornorm[1])
+            cmap = matplotlib.cm.ScalarMappable(norm, colormap)
+
+            ax.imshow(im, extent=extent, origin='lower', norm=norm, cmap=colormap)
+            
+            if inputs is not None and data is not None:
+                inputs_to_show = np.linspace(0, len(inputs[0])-1, n_inputs_to_show)
+                inputs_to_show = np.array(inputs_to_show, dtype=int)
+                for i in inputs_to_show:
                     x = inputs[0][i]
                     y = inputs[1][i]
-                    ax.plot(x,y,'o', markerfacecolor='none', markeredgewidth=2)
+                    val = data[i]
+                    color = cmap.to_rgba(val)
+                    ax.plot(x,y,'o', markerfacecolor=color, markeredgewidth=2, markersize=8)
                 
+        # 3 dimensions
+        if self.dim == 3:
+            if lims is None:
+                if axis == 2:
+                    xlim = [np.min(inputs[0]), np.max(inputs[0])]
+                    ylim = [np.min(inputs[1]), np.max(inputs[1])]
+                elif axis == 1:
+                    xlim = [np.min(inputs[0]), np.max(inputs[0])]
+                    ylim = [np.min(inputs[2]), np.max(inputs[2])]
+                elif axis == 0:
+                    xlim = [np.min(inputs[1]), np.max(inputs[1])]
+                    ylim = [np.min(inputs[2]), np.max(inputs[2])]
+            else:
+                xlim = lims[0]
+                ylim = lims[1]
+                
+            im, extent = self.get_array_2d_slice(xlim, ylim, resolution, axis=axis, axis_slice=axis_slice)
+            
+            if colornorm is None:
+                norm = matplotlib.colors.Normalize(np.min(im), np.max(im))
+            else:
+                norm = matplotlib.colors.Normalize(colornorm[0], colornorm[1])
+            cmap = matplotlib.cm.ScalarMappable(norm, colormap)
+
+            ax.imshow(im, extent=extent, origin='lower', norm=norm, cmap=colormap)
+            
+            if inputs is not None and data is not None:
+                
+                # find inputs that are close to slice:
+                inputs_to_show = []
+                for i in range(len(inputs[0])):
+                    if np.abs(inputs[axis][i] - axis_slice) <= axis_slice_threshold:
+                        inputs_to_show.append(i)
+                np.random.shuffle(inputs_to_show)
+                n = 0
+                for i in inputs_to_show:
+                    if n > n_inputs_to_show:
+                        break
+                    else:
+                        n += 1
+                    if axis == 2:
+                        x = inputs[0][i]
+                        y = inputs[1][i]
+                    if axis == 1:
+                        x = inputs[0][i]
+                        y = inputs[2][i]
+                    if axis == 0:
+                        x = inputs[1][i]
+                        y = inputs[2][i]
+                    val = data[i]
+                    color = cmap.to_rgba(val)
+                    ax.plot(x,y,'o', markerfacecolor=color, markeredgewidth=2, markersize=8)
             
 ###############################################################################################################
 # Linear Models
@@ -272,7 +347,7 @@ class GaussianModel1D(GaussianModelND):
         inrange = np.where(inputs > self.parameters['mean_0'] / 4.)[0].tolist()
         std_min = (np.min(inputs[inrange]) - self.parameters['mean_0'])/(2.)
         std_max = (np.max(inputs[inrange]) + self.parameters['mean_0'])/(2.)
-        self.parameters['std_0'] = np.mean([std_min, std_max])
+        self.parameters['std_0'] = np.mean([np.abs(std_min), np.abs(std_max)])
 
         self.parameters['magnitude'] = np.max(data)
         
@@ -307,14 +382,14 @@ class GaussianModel2D(GaussianModelND):
         
         # guess std dev        
         inrange = np.where(inputs > self.parameters['mean_0'] / 4)[0].tolist()
-        std_min = (np.min(inputs[0][inrange]) - self.parameters['mean_0'])/(-2.)
+        std_min = (np.min(inputs[0][inrange]) - self.parameters['mean_0'])/(2.)
         std_max = (np.max(inputs[0][inrange]) + self.parameters['mean_0'])/(2.)
-        self.parameters['std_0'] = np.mean([std_min, std_max])
+        self.parameters['std_0'] = np.mean([np.abs(std_min), np.abs(std_max)])
         
         inrange = np.where(inputs > self.parameters['mean_1'] / 4)[0].tolist()
-        std_min = (np.min(inputs[1][inrange]) - self.parameters['mean_1'])/(-2.)
+        std_min = (np.min(inputs[1][inrange]) - self.parameters['mean_1'])/(2.)
         std_max = (np.max(inputs[1][inrange]) + self.parameters['mean_1'])/(2.)
-        self.parameters['std_1'] = np.mean([std_min, std_max])
+        self.parameters['std_1'] = np.mean([np.abs(std_min), np.abs(std_max)])
         
         self.parameters['magnitude'] = np.max(data)
         
@@ -323,6 +398,8 @@ class GaussianModel2D(GaussianModelND):
 class GaussianModel3D(GaussianModelND):
     def __init__(self, parameters=None):
         self.dim = 3
+        self.inputs = None
+        self.data = None
         self.init_parameters(parameters)
         
     def fit_occurences(self, pts, bins=40, plot=False, method='optimize'):
@@ -343,7 +420,10 @@ class GaussianModel3D(GaussianModelND):
         n_samples = np.product(H.shape)
         #x, y, z = np.mgrid(xedges, yedges, zedges)
         
-        np.mgrid[xedges[0]:xedges[-1]:10j, 0:1:10j, 0:1:10j].shape
+        nedges = len(xedges)
+        s = str(nedges) + 'j'
+        nj = complex(s)
+        x,y,z = np.mgrid[xedges[0]:xedges[-1]:nj, yedges[0]:yedges[-1]:nj, zedges[0]:zedges[-1]:nj]
         
         y = y.reshape(n_samples)
         x = x.reshape(n_samples)
@@ -351,18 +431,18 @@ class GaussianModel3D(GaussianModelND):
         data = H.reshape(n_samples)
         inputs = [x, y, z]
         
-        self.fit(data, inputs, plot=plot, method=method)
+        self.fit_with_guess(data, inputs, plot=plot, method=method)
         
-    def get_array_2d_slice(self, xlim, ylim, resolution, perpendicular_axis=2, axis_slice=0):
+    def get_array_2d_slice(self, xlim, ylim, resolution, axis=2, axis_slice=0):
         x = np.arange(xlim[0], xlim[1], resolution, np.float32)
         y = np.arange(ylim[0], ylim[1], resolution, np.float32)[:,np.newaxis]
         z = np.ones_like(x)*axis_slice
         
-        if perpendicular_axis == 2:
+        if axis == 2:
             inputs = [x,y,z]
-        elif perpendicular_axis == 1:
+        elif axis == 1:
             inputs = [x,z,y]
-        elif perpendicular_axis == 0:
+        elif axis == 0:
             inputs = [z,x,y]
             
         extent = [np.min(x), np.max(x), np.min(y), np.max(y)]
@@ -379,19 +459,22 @@ class GaussianModel3D(GaussianModelND):
         inrange = np.where(inputs > self.parameters['mean_0'] / 4)[0].tolist()
         std_min = (np.min(inputs[0][inrange]) - self.parameters['mean_0'])/(2.)
         std_max = (np.max(inputs[0][inrange]) + self.parameters['mean_0'])/(2.)
-        self.parameters['std_0'] = np.mean([std_min, std_max])
+        self.parameters['std_0'] = np.mean([np.abs(std_min), np.abs(std_max)])
         
         inrange = np.where(inputs > self.parameters['mean_1'] / 4)[0].tolist()
         std_min = (np.min(inputs[1][inrange]) - self.parameters['mean_1'])/(2.)
         std_max = (np.max(inputs[1][inrange]) + self.parameters['mean_1'])/(2.)
-        self.parameters['std_1'] = np.mean([std_min, std_max])
+        self.parameters['std_1'] = np.mean([np.abs(std_min), np.abs(std_max)])
         
         inrange = np.where(inputs > self.parameters['mean_2'] / 4)[0].tolist()
         std_min = (np.min(inputs[2][inrange]) - self.parameters['mean_2'])/(2.)
         std_max = (np.max(inputs[2][inrange]) + self.parameters['mean_2'])/(2.)
-        self.parameters['std_2'] = np.mean([std_min, std_max])
+        self.parameters['std_2'] = np.mean([np.abs(std_min), np.abs(std_max)])
         
         self.parameters['magnitude'] = np.max(data)
+        
+        print 'Guess: '
+        print self.parameters
         
         return self.fit(data, inputs=inputs, plot=plot, method=method)
         
@@ -600,25 +683,14 @@ def example_gaussianmodel2d_fit():
 ###
 
 def example_gaussianmodel3d_fit():
-    x = np.random.normal(0, 1, 1000)
-    y = np.random.normal(0, 5, 1000)
-    z = np.random.normal(0, 2, 1000)
+    x = np.random.normal(0, 1, 10000)
+    y = np.random.normal(3, 20, 10000)
+    z = np.random.normal(0, 2, 10000)
     
     gm = GaussianModel3D()
-    gm.fit_occurences([x, y, z])
-    
-    if 0:
-    
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        
-        im, extent = gm.get_array_2d([np.min(x), np.max(x)], [np.min(y), np.max(y)], 0.01)
-        ax.imshow(im, extent=extent)
-        ax.plot(x,y,'b.')
-    
-        ax.set_xlabel('x')
-        ax.set_ylabel('y')
-        plt.show()
+    gm.fit_occurences([x, y, z], bins=50)
+    gm.show_fit(resolution=0.01, axis_slice_threshold=0.1, axis=2, n_inputs_to_show=150)
+    plt.show()
     
     return gm
 ###
