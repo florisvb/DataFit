@@ -40,7 +40,10 @@ class ModelBase(object):
             ans = ans.reshape(np.max(ans.shape))
         return ans
         
-    def fit(self, data, inputs=None, plot=False, method='optimize'):
+    def fit(self, data, inputs=None, plot=False, method='optimize', ignore_parameter_names=[]):
+    
+        self.inputs = inputs
+        self.data = data
         
         if inputs is None:
             inputs = [data[:,i].reshape(len(data)) for i in range(1, data.shape[1])]
@@ -59,8 +62,11 @@ class ModelBase(object):
             parameter_values = []
             parameter_names = []
             for name, value in self.parameters.items():
-                parameter_values.append(value)
-                parameter_names.append(name)
+                if name in ignore_parameter_names:
+                    continue
+                else:
+                    parameter_values.append(value)
+                    parameter_names.append(name)
             optimize.leastsq(f, parameter_values, parameter_names)
 
         # Linear Algebra Method            
@@ -106,6 +112,8 @@ class ModelBase(object):
         return self.parameters
             
     def ransac(self, data, inputs=None, parameters=None, min_data_vals=50, max_iterations=10, threshold=2e3, num_vals_req=100):
+        self.data = data
+        self.inputs = inputs
         if inputs is None:
             inputs = data[1:,:]
             data = data[0,:]
@@ -121,21 +129,30 @@ class ModelBase(object):
         return self.parameters
     
     
-    def plot(self, inputs):
+    def plot(self, inputs=None):
+        if inputs is None:
+            inputs = self.inputs
         
-        if type(inputs) is list:
-            deg = len(inputs)
-        else:
-            deg = 1
+        if inputs is not None:
+            
+            if type(inputs) is list:
+                deg = len(inputs)
+            else:
+                deg = 1
+            
+            if deg == 1:
+                if type(inputs) is list:
+                    inputs = inputs[0]
+                fig = plt.figure()
+                ax = fig.add_subplot(111)
+                vals = self.get_val(inputs)
+                ax.plot(inputs, vals, 'r.')
+            
+            elif deg == 2:
+                pass        
+                
         
-        if deg == 1:
-            fig = plt.figure()
-            ax = fig.add_subplot(111)
-            vals = self.get_val(inputs)
-            ax.plot(inputs, vals, 'r.')
-        
-        elif deg == 2:
-            pass        
+                
             
             
 ###############################################################################################################
@@ -154,12 +171,32 @@ class LinearModel(ModelBase):
             x = np.array(x)
         return self.parameters['slope']*x + self.parameters['intercept']
         
+    def show(self, ax=None, data=None, inputs=None, xlim=[-1,1]):
+        if inputs is None:
+            inputs = self.inputs
+        if data is None:
+            data = self.data
+            
+        if ax is None:
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+        
+        x = np.arange(xlim[0], xlim[-1], .001)
+        vals = self.get_val(x)
+        ax.plot(x, vals)
+        
+        if 1:
+            if type(inputs) is list:
+                inputs = inputs[0]
+            ax.plot(inputs, data, '.') 
+        
 ###############################################################################################################
 # Gaussian Models
 ###############################################################################################################
             
 class GaussianModelND(ModelBase):
     def __init__(self, dim=2, parameters=None):
+        self.inputs = None
         self.dim = dim
         self.init_parameters(parameters)
         
@@ -172,7 +209,7 @@ class GaussianModelND(ModelBase):
                 parameters.setdefault(mean_key, 0)
                 parameters.setdefault(std_key, 1)
         self.parameters = parameters
-                        
+        
     def get_val(self, inputs):
         if type(inputs) is not list:
             inputs = [inputs]
@@ -182,7 +219,7 @@ class GaussianModelND(ModelBase):
             mean_key = 'mean_' + str(i)
             std_key = 'std_' + str(i)
             mean = self.parameters[mean_key]
-            std = self.parameters[std_key]
+            std = np.abs(self.parameters[std_key])
             gauss_term = (0.5*(inputs[i] - mean)/std)**2
             gauss_terms.append(gauss_term)
         val = magnitude*np.exp(-1*sum(gauss_terms))
@@ -204,8 +241,48 @@ class GaussianModel1D(GaussianModelND):
             ax.plot(inputs[0], data, '.')
             ax.plot(inputs[0], self.get_val(inputs), 'r')
             
+    def show(self, ax=None, inputs=None, xlim=[-1,1]):
+        if inputs is None:
+            inputs = self.inputs
+            
+        if ax is None:
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+        
+        x = np.arange(xlim[0], xlim[-1], .001)
+        vals = self.get_val(x)
+        ax.plot(x, vals)
+        
+        if inputs is not None:
+            if type(inputs) is list:
+                inputs = inputs[0]
+            vals = self.get_val(inputs)
+            ax.plot(inputs, vals, '.') 
+            
+    def fit_with_guess(self, data, inputs=None, plot=False, method='optimize', ignore_parameter_names=[]):
+        if type(inputs) is list:
+            inputs = inputs[0]
+            
+        argsorted = np.argsort(inputs).tolist()
+        inputs = inputs[argsorted]
+        data = data[argsorted]
+        
+        argmax = np.argmax(data)
+        self.parameters['mean_0'] = inputs[argmax]
+
+        # guess std dev        
+        inrange = np.where(inputs > self.parameters['mean_0'] / 4.)[0].tolist()
+        std_min = (np.min(inputs[inrange]) - self.parameters['mean_0'])/(2.)
+        std_max = (np.max(inputs[inrange]) + self.parameters['mean_0'])/(2.)
+        self.parameters['std_0'] = np.mean([std_min, std_max])
+
+        self.parameters['magnitude'] = np.max(data)
+        
+        return self.fit(data, inputs=inputs, plot=plot, method=method, ignore_parameter_names=ignore_parameter_names)
+            
 class GaussianModel2D(GaussianModelND):
     def __init__(self, parameters=None):
+        self.inputs = None
         self.dim = 2
         self.init_parameters(parameters)
         
@@ -236,12 +313,128 @@ class GaussianModel2D(GaussianModelND):
         extent = [np.min(x), np.max(x), np.min(y), np.max(y)]
         return self.get_val(inputs), extent
         
-    def show(self, xlim=[0,1], ylim=[0,1], resolution=0.01):
+    def show(self, ax=None, xlim=[0,1], ylim=[0,1], resolution=0.001):
         im, extent = self.get_array_2d(xlim, ylim, resolution)
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        ax.imshow(im, extent=extent)
+        if ax is None:
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+        ax.imshow(im, extent=extent, origin='lower')
+        
+        if self.inputs is not None:
+            for i in range(len(self.inputs[0])):
+                x = self.inputs[0][i]
+                y = self.inputs[1][i]
+                ax.plot(x,y,'o', markerfacecolor='none', markeredgewidth=2)
+                
+    def fit_with_guess(self, data, inputs=None, plot=False, method='optimize'):
+        
+        argmax = np.argmax(data)
+        self.parameters['mean_0'] = inputs[0][argmax]
+        self.parameters['mean_1'] = inputs[1][argmax]
+        
+        # guess std dev        
+        inrange = np.where(inputs > self.parameters['mean_0'] / 4)[0].tolist()
+        std_min = (np.min(inputs[0][inrange]) - self.parameters['mean_0'])/(-2.)
+        std_max = (np.max(inputs[0][inrange]) + self.parameters['mean_0'])/(2.)
+        self.parameters['std_0'] = np.mean([std_min, std_max])
+        
+        inrange = np.where(inputs > self.parameters['mean_1'] / 4)[0].tolist()
+        std_min = (np.min(inputs[1][inrange]) - self.parameters['mean_1'])/(-2.)
+        std_max = (np.max(inputs[1][inrange]) + self.parameters['mean_1'])/(2.)
+        self.parameters['std_1'] = np.mean([std_min, std_max])
+        
+        self.parameters['magnitude'] = np.max(data)
+        
+        return self.fit(data, inputs=inputs, plot=plot, method=method)
+        
+class GaussianModel3D(GaussianModelND):
+    def __init__(self, parameters=None):
+        self.inputs = None
+        self.dim = 3
+        self.init_parameters(parameters)
+        
+    def fit_occurences(self, pts, bins=40, plot=False, method='optimize'):
+        x = pts[0]
+        y = pts[1]
+        z = pts[2]
+        pts_arr = np.zeros([len(x), 3])
+        print pts_arr.shape, x.shape
+        pts_arr[:,0] = x
+        pts_arr[:,1] = y
+        pts_arr[:,2] = z
+    
+        H, edges = np.histogramdd(pts_arr, bins=bins)
+        xedges = np.diff(edges[0]) + edges[0][0:-1]
+        yedges = np.diff(edges[1]) + edges[1][0:-1]
+        zedges = np.diff(edges[2]) + edges[2][0:-1]
+
+        n_samples = np.product(H.shape)
+        #x, y, z = np.mgrid(xedges, yedges, zedges)
+        
+        np.mgrid[xedges[0]:xedges[-1]:10j, 0:1:10j, 0:1:10j].shape
+        
+        y = y.reshape(n_samples)
+        x = x.reshape(n_samples)
+        z = z.reshape(n_samples)
+        data = H.reshape(n_samples)
+        inputs = [x, y, z]
+        
+        self.fit(data, inputs, plot=plot, method=method)
+        
+    def get_array_2d(self, xlim, ylim, resolution, perpendicular_axis=2, axis_slice=0):
+        x = np.arange(xlim[0], xlim[1], resolution, np.float32)
+        y = np.arange(ylim[0], ylim[1], resolution, np.float32)[:,np.newaxis]
+        z = np.ones_like(x)*axis_slice
+        
+        if perpendicular_axis == 2:
+            inputs = [x,y,z]
+        elif perpendicular_axis == 1:
+            inputs = [x,z,y]
+        elif perpendicular_axis == 0:
+            inputs = [z,x,y]
             
+        extent = [np.min(x), np.max(x), np.min(y), np.max(y)]
+        return self.get_val(inputs), extent
+        
+    def show(self, ax=None, xlim=[0,1], ylim=[0,1], resolution=0.001, perpendicular_axis=2, axis_slice=0):
+        im, extent = self.get_array_2d(xlim, ylim, resolution, perpendicular_axis, axis_slice)
+        if ax is None:
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+        ax.imshow(im, extent=extent, origin='lower')
+        
+        if self.inputs is not None:
+            for i in range(len(self.inputs[0])):
+                x = self.inputs[0][i]
+                y = self.inputs[1][i]
+                ax.plot(x,y,'o', markerfacecolor='none', markeredgewidth=2)
+                
+    def fit_with_guess(self, data, inputs=None, plot=False, method='optimize'):
+        
+        argmax = np.argmax(data)
+        self.parameters['mean_0'] = inputs[0][argmax]
+        self.parameters['mean_1'] = inputs[1][argmax]
+        self.parameters['mean_2'] = inputs[2][argmax]
+        
+        # guess std dev        
+        inrange = np.where(inputs > self.parameters['mean_0'] / 4)[0].tolist()
+        std_min = (np.min(inputs[0][inrange]) - self.parameters['mean_0'])/(2.)
+        std_max = (np.max(inputs[0][inrange]) + self.parameters['mean_0'])/(2.)
+        self.parameters['std_0'] = np.mean([std_min, std_max])
+        
+        inrange = np.where(inputs > self.parameters['mean_1'] / 4)[0].tolist()
+        std_min = (np.min(inputs[1][inrange]) - self.parameters['mean_1'])/(2.)
+        std_max = (np.max(inputs[1][inrange]) + self.parameters['mean_1'])/(2.)
+        self.parameters['std_1'] = np.mean([std_min, std_max])
+        
+        inrange = np.where(inputs > self.parameters['mean_2'] / 4)[0].tolist()
+        std_min = (np.min(inputs[2][inrange]) - self.parameters['mean_2'])/(2.)
+        std_max = (np.max(inputs[2][inrange]) + self.parameters['mean_2'])/(2.)
+        self.parameters['std_2'] = np.mean([std_min, std_max])
+        
+        self.parameters['magnitude'] = np.max(data)
+        
+        return self.fit(data, inputs=inputs, plot=plot, method=method)
         
 ######################################################################################
 # Gaussian Models -- Time Varying
@@ -254,7 +447,7 @@ class GaussianModelND_TimeVarying(ModelBase):
         
     def init_parameters(self, parameters):
         if parameters is None:
-            parameters = {'magnitude': 1}
+            parameters = {'magnitude_intercept': 1, 'magnitude_slope': 0}
             for n in range(self.dim):
                 mean_intercept_key = 'mean_' + str(n) + '_intercept'
                 mean_slope_key = 'mean_' + str(n) + '_slope'
@@ -269,10 +462,10 @@ class GaussianModelND_TimeVarying(ModelBase):
     def get_val(self, inputs):
         if type(inputs) is not list:
             inputs = [inputs]
-        magnitude = self.parameters['magnitude']
         gauss_terms = []
         t = inputs[0]
         inputs = inputs[1]
+        magnitude = self.parameters['magnitude_intercept'] + self.parameters['magnitude_slope']*t
         for n in range(self.dim):
             mean_intercept_key = 'mean_' + str(n) + '_intercept'
             mean_slope_key = 'mean_' + str(n) + '_slope'
@@ -292,16 +485,19 @@ class GaussianModelND_TimeVarying(ModelBase):
         # data should be a list of the data at different timepoints
         
         gm_list = []
-        for i, t in enumerate(timestamps):
-            gm = GaussianModel2D()
-            gm.fit(data[i], inputs)
+        for i, t in enumerate(timestamps):  
+            if self.dim == 2:
+                gm = GaussianModel2D()
+            elif self.dim == 1:
+                gm = GaussianModel1D()
+            gm.fit_with_guess(data[i], inputs)
             gm_list.append(gm)
             
         parameter_dict = {}
         time_indep_parameter_dict = {}
         for key in self.parameters.keys():
             if '_slope' in key:
-                s = key.rstrip('_slope')
+                s = key.split('_slope')[0]
                 parameter_dict.setdefault(s,np.zeros_like(timestamps)) 
             elif '_slope' not in key and '_intercept' not in key:
                 time_indep_parameter_dict.setdefault(key,np.zeros_like(timestamps)) 
@@ -332,7 +528,12 @@ class GaussianModelND_TimeVarying(ModelBase):
         
         # time independent parameters
         for key, parameter in time_indep_parameter_dict.items():
-            self.parameters[key] = np.mean(parameter) 
+            self.parameters[key] = np.median(parameter) 
+        
+class GaussianModel1D_TimeVarying(GaussianModelND_TimeVarying):
+    def __init__(self, parameters=None):
+        self.dim = 1
+        self.init_parameters(parameters)
         
 class GaussianModel2D_TimeVarying(GaussianModelND_TimeVarying):
     def __init__(self, parameters=None):
@@ -383,15 +584,20 @@ def example_linearmodel_fit(method='optimize'):
     
 ###
 
-def example_linear_ransac():
+def example_linear_ransac(plot=True):
     n_pts = 1000
+    n_big_noise_pts = 50
     
     x = np.random.random(n_pts)
     noise = np.random.random(n_pts)
     y = x*10 + noise + np.random.random(1)
+    big_noise = np.random.random(n_big_noise_pts)*5
+    y[0:n_big_noise_pts] += big_noise
     
     linearmodel = LinearModel()
     ransac_fit = linearmodel.ransac(y,x,min_data_vals=50, max_iterations=10, threshold=2e3, num_vals_req=500)
+    
+    linearmodel.show(data=y, inputs=x, xlim=[0,1])
     
     return ransac_fit, linearmodel
 ###
@@ -426,7 +632,30 @@ def example_gaussianmodel2d_fit():
     
     return gm
     
+###
+
+def example_gaussianmodel3d_fit():
+    x = np.random.normal(0, 1, 1000)
+    y = np.random.normal(0, 5, 1000)
+    z = np.random.normal(0, 2, 1000)
     
+    gm = GaussianModel3D()
+    gm.fit_occurences([x, y, z])
+    
+    if 0:
+    
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        
+        im, extent = gm.get_array_2d([np.min(x), np.max(x)], [np.min(y), np.max(y)], 0.01)
+        ax.imshow(im, extent=extent)
+        ax.plot(x,y,'b.')
+    
+        ax.set_xlabel('x')
+        ax.set_ylabel('y')
+        plt.show()
+    
+    return gm
 ###
 
 def example_gaussianmodel2d_timevarying_movie(gm=None):
