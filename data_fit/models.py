@@ -42,9 +42,6 @@ class ModelBase(object):
         
     def fit(self, data, inputs=None, plot=False, method='optimize', ignore_parameter_names=[]):
     
-        self.inputs = inputs
-        self.data = data
-        
         if inputs is None:
             inputs = [data[:,i].reshape(len(data)) for i in range(1, data.shape[1])]
             data = data[:,0].reshape(len(data))
@@ -112,8 +109,6 @@ class ModelBase(object):
         return self.parameters
             
     def ransac(self, data, inputs=None, parameters=None, min_data_vals=50, max_iterations=10, threshold=2e3, num_vals_req=100):
-        self.data = data
-        self.inputs = inputs
         if inputs is None:
             inputs = data[1:,:]
             data = data[0,:]
@@ -121,39 +116,78 @@ class ModelBase(object):
         
         if parameters is None:
             parameters = self.parameters
-        ransac_fit = ransac.ransac(data,self,min_data_vals, max_iterations, threshold, num_vals_req,debug=False,return_all=False)
+        ransac_fit = ransac.ransac(data,self,min_data_vals, max_iterations, threshold, num_vals_req,debug=True,return_all=False)
         
         print 'ransac fit: ', ransac_fit
         self.parameters = ransac_fit
         
         return self.parameters
-    
-    
-    def plot(self, inputs=None):
-        if inputs is None:
-            inputs = self.inputs
         
+    def get_array_2d(self, xlim, ylim, resolution):
+        assert(self.dim==2)
+        x = np.arange(xlim[0], xlim[1], resolution, np.float32)
+        y = np.arange(ylim[0], ylim[1], resolution, np.float32)[:,np.newaxis]
+        inputs = [x,y]
+        extent = [np.min(x), np.max(x), np.min(y), np.max(y)]
+        return self.get_val(inputs), extent
+    
+    def plot(self, inputs):
         if inputs is not None:
-            
-            if type(inputs) is list:
-                deg = len(inputs)
-            else:
-                deg = 1
-            
-            if deg == 1:
+            if self.dim == 1:
                 if type(inputs) is list:
                     inputs = inputs[0]
                 fig = plt.figure()
                 ax = fig.add_subplot(111)
                 vals = self.get_val(inputs)
                 ax.plot(inputs, vals, 'r.')
-            
             elif deg == 2:
                 pass        
                 
+    def show_fit(self, data=None, inputs=None, ax=None, lims=[], resolution=0.001):
         
-                
+        if inputs is not None:
+            if type(inputs) is not list: inputs = [inputs]
+        if len(lims) != self.dim: lims = None
+
+        if ax is None:
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
             
+        # 1 dimension
+        if self.dim == 1:
+            if inputs is not None:
+                if type(inputs) is list:
+                    inputs = inputs[0]
+                if lims is None:
+                    xlim = [np.min(inputs), np.max(inputs)]
+                # plot raw data
+                ax.plot(inputs, data, '.') 
+            else:
+                if lims is None:
+                    xlim = [0,1]
+            
+            # plot fit
+            x = np.arange(xlim[0], xlim[-1], resolution)
+            vals = self.get_val(x)
+            ax.plot(x, vals, linewidth=3)
+            
+            
+            
+        # 2 dimensions
+        if self.dim == 2:
+            if lims is None:
+                xlim = [np.min(inputs[0]), np.max(inputs[0])]
+                ylim = [np.min(inputs[1]), np.max(inputs[1])]
+            
+            im, extent = self.get_array_2d(xlim, ylim, resolution)
+            ax.imshow(im, extent=extent, origin='lower')
+            
+            if inputs is not None:
+                for i in range(len(inputs[0])):
+                    x = inputs[0][i]
+                    y = inputs[1][i]
+                    ax.plot(x,y,'o', markerfacecolor='none', markeredgewidth=2)
+                
             
 ###############################################################################################################
 # Linear Models
@@ -161,6 +195,7 @@ class ModelBase(object):
 
 class LinearModel(ModelBase):
     def __init__(self, parameters=None):
+        self.dim = 1
         if parameters is None:
             self.parameters = {'slope': 8, 'intercept': 0}
         else:
@@ -171,32 +206,13 @@ class LinearModel(ModelBase):
             x = np.array(x)
         return self.parameters['slope']*x + self.parameters['intercept']
         
-    def show(self, ax=None, data=None, inputs=None, xlim=[-1,1]):
-        if inputs is None:
-            inputs = self.inputs
-        if data is None:
-            data = self.data
-            
-        if ax is None:
-            fig = plt.figure()
-            ax = fig.add_subplot(111)
-        
-        x = np.arange(xlim[0], xlim[-1], .001)
-        vals = self.get_val(x)
-        ax.plot(x, vals)
-        
-        if 1:
-            if type(inputs) is list:
-                inputs = inputs[0]
-            ax.plot(inputs, data, '.') 
-        
+                
 ###############################################################################################################
 # Gaussian Models
 ###############################################################################################################
             
 class GaussianModelND(ModelBase):
     def __init__(self, dim=2, parameters=None):
-        self.inputs = None
         self.dim = dim
         self.init_parameters(parameters)
         
@@ -241,24 +257,6 @@ class GaussianModel1D(GaussianModelND):
             ax.plot(inputs[0], data, '.')
             ax.plot(inputs[0], self.get_val(inputs), 'r')
             
-    def show(self, ax=None, inputs=None, xlim=[-1,1]):
-        if inputs is None:
-            inputs = self.inputs
-            
-        if ax is None:
-            fig = plt.figure()
-            ax = fig.add_subplot(111)
-        
-        x = np.arange(xlim[0], xlim[-1], .001)
-        vals = self.get_val(x)
-        ax.plot(x, vals)
-        
-        if inputs is not None:
-            if type(inputs) is list:
-                inputs = inputs[0]
-            vals = self.get_val(inputs)
-            ax.plot(inputs, vals, '.') 
-            
     def fit_with_guess(self, data, inputs=None, plot=False, method='optimize', ignore_parameter_names=[]):
         if type(inputs) is list:
             inputs = inputs[0]
@@ -282,7 +280,6 @@ class GaussianModel1D(GaussianModelND):
             
 class GaussianModel2D(GaussianModelND):
     def __init__(self, parameters=None):
-        self.inputs = None
         self.dim = 2
         self.init_parameters(parameters)
         
@@ -300,32 +297,8 @@ class GaussianModel2D(GaussianModelND):
         data = H.reshape(n_samples)
         inputs = [x, y]
         
-
-        #print data.shape
-        #print x.shape, y.shape
-        
         self.fit(data, inputs, plot=plot, method=method)
         
-    def get_array_2d(self, xlim, ylim, resolution):
-        x = np.arange(xlim[0], xlim[1], resolution, np.float32)
-        y = np.arange(ylim[0], ylim[1], resolution, np.float32)[:,np.newaxis]
-        inputs = [x,y]
-        extent = [np.min(x), np.max(x), np.min(y), np.max(y)]
-        return self.get_val(inputs), extent
-        
-    def show(self, ax=None, xlim=[0,1], ylim=[0,1], resolution=0.001):
-        im, extent = self.get_array_2d(xlim, ylim, resolution)
-        if ax is None:
-            fig = plt.figure()
-            ax = fig.add_subplot(111)
-        ax.imshow(im, extent=extent, origin='lower')
-        
-        if self.inputs is not None:
-            for i in range(len(self.inputs[0])):
-                x = self.inputs[0][i]
-                y = self.inputs[1][i]
-                ax.plot(x,y,'o', markerfacecolor='none', markeredgewidth=2)
-                
     def fit_with_guess(self, data, inputs=None, plot=False, method='optimize'):
         
         argmax = np.argmax(data)
@@ -349,7 +322,6 @@ class GaussianModel2D(GaussianModelND):
         
 class GaussianModel3D(GaussianModelND):
     def __init__(self, parameters=None):
-        self.inputs = None
         self.dim = 3
         self.init_parameters(parameters)
         
@@ -381,7 +353,7 @@ class GaussianModel3D(GaussianModelND):
         
         self.fit(data, inputs, plot=plot, method=method)
         
-    def get_array_2d(self, xlim, ylim, resolution, perpendicular_axis=2, axis_slice=0):
+    def get_array_2d_slice(self, xlim, ylim, resolution, perpendicular_axis=2, axis_slice=0):
         x = np.arange(xlim[0], xlim[1], resolution, np.float32)
         y = np.arange(ylim[0], ylim[1], resolution, np.float32)[:,np.newaxis]
         z = np.ones_like(x)*axis_slice
@@ -396,19 +368,6 @@ class GaussianModel3D(GaussianModelND):
         extent = [np.min(x), np.max(x), np.min(y), np.max(y)]
         return self.get_val(inputs), extent
         
-    def show(self, ax=None, xlim=[0,1], ylim=[0,1], resolution=0.001, perpendicular_axis=2, axis_slice=0):
-        im, extent = self.get_array_2d(xlim, ylim, resolution, perpendicular_axis, axis_slice)
-        if ax is None:
-            fig = plt.figure()
-            ax = fig.add_subplot(111)
-        ax.imshow(im, extent=extent, origin='lower')
-        
-        if self.inputs is not None:
-            for i in range(len(self.inputs[0])):
-                x = self.inputs[0][i]
-                y = self.inputs[1][i]
-                ax.plot(x,y,'o', markerfacecolor='none', markeredgewidth=2)
-                
     def fit_with_guess(self, data, inputs=None, plot=False, method='optimize'):
         
         argmax = np.argmax(data)
@@ -586,18 +545,24 @@ def example_linearmodel_fit(method='optimize'):
 
 def example_linear_ransac(plot=True):
     n_pts = 1000
-    n_big_noise_pts = 50
-    
+    n_big_noise_pts = 200
+
     x = np.random.random(n_pts)
     noise = np.random.random(n_pts)
     y = x*10 + noise + np.random.random(1)
-    big_noise = np.random.random(n_big_noise_pts)*5
+    big_noise = x[0:n_big_noise_pts]*30 + (np.random.random(n_big_noise_pts)-0.5)*20
     y[0:n_big_noise_pts] += big_noise
-    
+
     linearmodel = LinearModel()
-    ransac_fit = linearmodel.ransac(y,x,min_data_vals=50, max_iterations=10, threshold=2e3, num_vals_req=500)
+    ransac_fit = linearmodel.ransac(y,x,min_data_vals=50, max_iterations=20, threshold=1e-10, num_vals_req=200)
     
-    linearmodel.show(data=y, inputs=x, xlim=[0,1])
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    
+    linearmodel.show_fit(y, x, ax=ax)
+    
+    linearmodel.fit(y,x)
+    linearmodel.show_fit(ax=ax)
     
     return ransac_fit, linearmodel
 ###
