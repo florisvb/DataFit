@@ -122,7 +122,7 @@ class ModelBase(object):
             parameters = self.parameters
         ransac_fit = ransac.ransac(data,self,min_data_vals, max_iterations, threshold, num_vals_req,debug=True,return_all=False)
         
-        print 'ransac fit: ', ransac_fit
+        #print 'ransac fit: ', ransac_fit
         self.parameters = ransac_fit
         
         return self.parameters
@@ -407,7 +407,6 @@ class GaussianModel3D(GaussianModelND):
         y = pts[1]
         z = pts[2]
         pts_arr = np.zeros([len(x), 3])
-        print pts_arr.shape, x.shape
         pts_arr[:,0] = x
         pts_arr[:,1] = y
         pts_arr[:,2] = z
@@ -473,8 +472,8 @@ class GaussianModel3D(GaussianModelND):
         
         self.parameters['magnitude'] = np.max(data)
         
-        print 'Guess: '
-        print self.parameters
+        #print 'Guess: '
+        #print self.parameters
         
         return self.fit(data, inputs=inputs, plot=plot, method=method)
         
@@ -522,18 +521,27 @@ class GaussianModelND_TimeVarying(ModelBase):
         val = magnitude*np.exp(-1*sum(gauss_terms))
         return val
         
-    def fit(self, timestamps, data, inputs):
+    def fit(self, timestamps, data, inputs, return_gm_list_only=False):
         # inputs should not be time varying
         # data should be a list of the data at different timepoints
         
+        self.inputs = inputs
+        self.data = data
+        self.timestamps = timestamps
+        
         gm_list = []
         for i, t in enumerate(timestamps):  
-            if self.dim == 2:
-                gm = GaussianModel2D()
-            elif self.dim == 1:
+            if self.dim == 1:
                 gm = GaussianModel1D()
+            elif self.dim == 2:
+                gm = GaussianModel2D()
+            elif self.dim == 3:
+                gm = GaussianModel3D()
             gm.fit_with_guess(data[i], inputs)
             gm_list.append(gm)
+            
+        if return_gm_list_only:
+            return gm_list
             
         parameter_dict = {}
         time_indep_parameter_dict = {}
@@ -571,6 +579,155 @@ class GaussianModelND_TimeVarying(ModelBase):
         # time independent parameters
         for key, parameter in time_indep_parameter_dict.items():
             self.parameters[key] = np.median(parameter) 
+            
+    def show_fit(self, t, data=None, inputs=None, ax=None, lims=[], resolution=0.001, colornorm=None, colormap='jet', axis_slice=0, axis=2, n_inputs_to_show=50, axis_slice_threshold=0.01, animate=False, timerange=[0,1], dt=0.05):
+        
+        if data is None:
+            data = self.data
+        if inputs is None:
+            inputs = self.inputs
+        
+        if inputs is not None:
+            if type(inputs) is not list: inputs = [inputs]
+        if len(lims) != self.dim: lims = None
+
+        if ax is None:
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+            
+        data_index = np.argmin(np.abs(self.timestamps-t))
+            
+        # 1 dimension
+        if self.dim == 1:
+            if inputs is not None:
+                if type(inputs) is list:
+                    inputs = inputs[0]
+                if lims is None:
+                    xlim = [np.min(inputs), np.max(inputs)]
+                # plot raw data
+                ax.plot(inputs, data, '.') 
+            else:
+                if lims is None:
+                    xlim = [0,1]
+            
+            # plot fit
+            x = np.arange(xlim[0], xlim[-1], resolution)
+            vals = self.get_val([t, x])
+            ax.plot(x, vals, linewidth=3)
+            
+            
+            
+        # 2 dimensions
+        if self.dim == 2:
+            if lims is None:
+                xlim = [np.min(inputs[0]), np.max(inputs[0])]
+                ylim = [np.min(inputs[1]), np.max(inputs[1])]
+            else:
+                xlim = lims[0]
+                ylim = lims[1]
+                
+            im, extent = self.get_array_2d(t, xlim, ylim, resolution)
+            
+            if colornorm is None:
+                norm = matplotlib.colors.Normalize(np.min(im), np.max(im))
+            else:
+                norm = matplotlib.colors.Normalize(colornorm[0], colornorm[1])
+            cmap = matplotlib.cm.ScalarMappable(norm, colormap)
+
+            ax.imshow(im, extent=extent, origin='lower', norm=norm, cmap=colormap)
+            
+            if inputs is not None and data is not None:
+                inputs_to_show = np.linspace(0, len(inputs[0])-1, n_inputs_to_show)
+                inputs_to_show = np.array(inputs_to_show, dtype=int)
+                for i in inputs_to_show:
+                    x = inputs[0][i]
+                    y = inputs[1][i]
+                    val = data[i]
+                    color = cmap.to_rgba(val)
+                    ax.plot(x,y,'o', markerfacecolor=color, markeredgewidth=2, markersize=8)
+                
+        # 3 dimensions
+        if self.dim == 3:
+            if lims is None:
+                if axis == 2:
+                    xlim = [np.min(inputs[0]), np.max(inputs[0])]
+                    ylim = [np.min(inputs[1]), np.max(inputs[1])]
+                elif axis == 1:
+                    xlim = [np.min(inputs[0]), np.max(inputs[0])]
+                    ylim = [np.min(inputs[2]), np.max(inputs[2])]
+                elif axis == 0:
+                    xlim = [np.min(inputs[1]), np.max(inputs[1])]
+                    ylim = [np.min(inputs[2]), np.max(inputs[2])]
+            else:
+                xlim = lims[0]
+                ylim = lims[1]
+                
+            im, extent = self.get_array_2d_slice(t, xlim, ylim, resolution, axis=axis, axis_slice=axis_slice)
+            
+            if colornorm is None:
+                norm = matplotlib.colors.Normalize(np.min(im), np.max(im))
+            else:
+                norm = matplotlib.colors.Normalize(colornorm[0], colornorm[1])
+            cmap = matplotlib.cm.ScalarMappable(norm, colormap)
+
+            im = ax.imshow(im, extent=extent, origin='lower', norm=norm, cmap=colormap)
+            
+            if inputs is not None and data is not None:
+                
+                # find inputs that are close to slice:
+                inputs_to_show = []
+                for i in range(len(inputs[0])):
+                    if np.abs(inputs[axis][i] - axis_slice) <= axis_slice_threshold:
+                        inputs_to_show.append(i)
+                np.random.shuffle(inputs_to_show)
+                n = 0
+                for i in inputs_to_show:
+                    if n > n_inputs_to_show:
+                        break
+                    else:
+                        n += 1
+                    if axis == 2:
+                        x = inputs[0][i]
+                        y = inputs[1][i]
+                    if axis == 1:
+                        x = inputs[0][i]
+                        y = inputs[2][i]
+                    if axis == 0:
+                        x = inputs[1][i]
+                        y = inputs[2][i]
+                    val = data[data_index][i]
+                    color = cmap.to_rgba(val)
+                    ax.plot(x,y,'o', markerfacecolor=color, markeredgewidth=2, markersize=8, zorder=100)
+                    
+            if animate:
+                anim_params = {'t': timerange[0], 'xlim': xlim, 'ylim': ylim, 't_min': timerange[0], 't_max': timerange[-1], 'dt': dt, 'resolution': resolution}
+                def updatefig(*args):
+                    anim_params['t'] += anim_params['dt']
+                    if anim_params['t'] > anim_params['t_max']:
+                        anim_params['t'] = anim_params['t_min']
+                                    
+                    array, extent = self.get_array_2d_slice(anim_params['t'], anim_params['xlim'], anim_params['ylim'], anim_params['resolution'], axis=axis, axis_slice=axis_slice)
+                    
+                    im.set_array(array)
+                    return im,
+                
+                animate_plot = animation.FuncAnimation(fig, updatefig, anim_params, interval=50, blit=True)
+                plt.show()
+                
+    def get_time_trace_at_point(self, timerange, position, resolution=0.01):
+        timestamps = np.arange(timerange[0], timerange[1], resolution)
+        values = np.zeros_like(timestamps)
+        for i, t in enumerate(timestamps):
+            values[i] = self.get_val([t, position])
+        return timestamps, values
+        
+    def plot_time_trace_at_point(self, timerange, position, resolution=0.01, ax=None):
+        if ax is None:
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+            timestamps, values = self.get_time_trace_at_point(timerange, position, resolution)
+            ax.plot(timestamps, values) 
+                    
         
 class GaussianModel1D_TimeVarying(GaussianModelND_TimeVarying):
     def __init__(self, parameters=None):
@@ -589,7 +746,26 @@ class GaussianModel2D_TimeVarying(GaussianModelND_TimeVarying):
         extent = [np.min(x), np.max(x), np.min(y), np.max(y)]
         return self.get_val(inputs), extent
         
+class GaussianModel3D_TimeVarying(GaussianModelND_TimeVarying):
+    def __init__(self, parameters=None):
+        self.dim = 3
+        self.init_parameters(parameters)
+        
+    def get_array_2d_slice(self, t, xlim, ylim, resolution, axis=2, axis_slice=0):
+        x = np.arange(xlim[0], xlim[1], resolution, np.float32)
+        y = np.arange(ylim[0], ylim[1], resolution, np.float32)[:,np.newaxis]
+        z = np.ones_like(x)*axis_slice
+        
+        if axis == 2:
+            inputs = [x,y,z]
+        elif axis == 1:
+            inputs = [x,z,y]
+        elif axis == 0:
+            inputs = [z,x,y]
             
+        extent = [np.min(x), np.max(x), np.min(y), np.max(y)]
+        return self.get_val([t, inputs]), extent
+        
 ###
     
         
