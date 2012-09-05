@@ -13,7 +13,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
-import floris_plot_lib as fpl
+import fly_plot_lib.plot as fpl
 
 
 class ModelBase(object):
@@ -285,6 +285,14 @@ class LinearModel(ModelBase):
 ###############################################################################################################
 # Gaussian Models
 ###############################################################################################################
+
+def get_ndim_gaussian_model(n):
+    if n == 1:
+        return GaussianModel1D()
+    if n == 2:
+        return GaussianModel2D()
+    if n == 3:
+        return GaussianModel3D()
             
 class GaussianModelND(ModelBase):
     def __init__(self, dim=2, parameters=None):
@@ -727,7 +735,15 @@ class GaussianModelND_TimeVarying(ModelBase):
             ax = fig.add_subplot(111)
             timestamps, values = self.get_time_trace_at_point(timerange, position, resolution)
             ax.plot(timestamps, values) 
-                    
+            
+    def get_gaussian_model_at_time_t(self, t):
+        gm = get_ndim_gaussian_model(self.dim)
+        for param in gm.parameters.keys():
+            # find slope and intercept key in timevarying gaussian, and get val at time t
+            intercept = self.parameters[param+'_intercept']
+            slope = self.parameters[param+'_slope']
+            gm.parameters[param] = intercept + slope*t
+        return gm
         
 class GaussianModel1D_TimeVarying(GaussianModelND_TimeVarying):
     def __init__(self, parameters=None):
