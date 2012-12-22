@@ -329,8 +329,8 @@ class GaussianModel1D(GaussianModelND):
         self.dim = 1
         self.init_parameters(parameters)
         
-    def fit_occurences(self, x, bins=40, plot=False, method='optimize'):
-        data, edges = np.histogram(x, bins=bins)
+    def fit_occurences(self, x, bins=40, plot=False, method='optimize', density=True):
+        data, edges = np.histogram(x, bins=bins, density=density)
         inputs = [np.diff(edges) + edges[0:-1]]
         self.fit(data, inputs, method=method)
         
@@ -783,7 +783,173 @@ class GaussianModel3D_TimeVarying(GaussianModelND_TimeVarying):
         return self.get_val([t, inputs]), extent
         
 ###
+
+######################################################################################
+# Log Normals
+######################################################################################
+
+def get_ndim_lognormal_model(n):
+    if n == 1:
+        return LogNormalModel1D()
+    else:
+        raise ValueError('not implimented')
+                    
+class LogNormalModelND(ModelBase):
+    '''
+    models a lognormal + gaussian distribution
     
+    '''
+    def __init__(self, dim=1, parameters=None):
+        self.dim = dim
+        self.init_parameters(parameters)
+        
+    def init_parameters(self, parameters):
+        if parameters is None:
+            parameters = {'magnitude': 1}
+            for n in range(self.dim):
+                mean_key = 'mean_' + str(n)
+                std_key = 'std_' + str(n)
+                parameters.setdefault(mean_key, 0)
+                parameters.setdefault(std_key, 1)
+        self.parameters = parameters
+        
+    def get_val(self, inputs):
+        if type(inputs) is not list:
+            inputs = [inputs]
+        magnitude = self.parameters['magnitude']
+        terms = []
+        for i in range(self.dim):
+            mean_key = 'mean_' + str(i)
+            std_key = 'std_' + str(i)
+            mean = self.parameters[mean_key]
+            std = np.abs(self.parameters[std_key])
+            
+            exponent = ((np.log(inputs[i])-mean)**2)/(2*std**2)
+            coeff = 1/(inputs[i]*np.sqrt(2*np.pi*std**2))
+            lognorm_term = coeff*np.exp(-1*exponent)
+            terms.append(magnitude*lognorm_term)
+        # NOTE: This is *NOT* correct for ndim (it works properly for 1 dimensional)
+        if self.dim != 1:
+            raise ValueError('ndim not implimented!, ignorming dims beyond 1')
+        val = terms[0]
+        return val
+        
+class LogNormalModel1D(LogNormalModelND):
+    def __init__(self, parameters=None):
+        self.dim = 1
+        self.init_parameters(parameters)
+        
+    def fit_occurences(self, x, bins=40, plot=False, method='optimize', density=True):
+        data, edges = np.histogram(x, bins=bins, density=density)
+        inputs = [np.diff(edges) + edges[0:-1]]
+        self.fit(data, inputs, method=method)
+        
+        if plot:
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+            ax.plot(inputs[0], data, '.')
+            ax.plot(inputs[0], self.get_val(inputs), 'r')
+        
+        
+######################################################################################
+# Gaussian + Log Normals
+######################################################################################
+
+def get_ndim_gaussianlognormal_model(n):
+    if n == 1:
+        return GaussianLogNormalModel1D()
+    else:
+        raise ValueError('not implimented')
+                    
+class GaussianLogNormalModelND(ModelBase):
+    '''
+    models a lognormal + gaussian distribution
+    
+    '''
+    def __init__(self, dim=1, parameters=None):
+        self.dim = dim
+        self.init_parameters(parameters)
+        
+    def init_parameters(self, parameters):
+        if parameters is None:
+            parameters = {'lognormmagnitude': 1}
+            parameters.setdefault('gaussmagnitude', 1)
+            for n in range(self.dim):
+                mean_key = 'lognormmean_' + str(n)
+                std_key = 'lognormstd_' + str(n)
+                stdgauss_key = 'gaussstd_' + str(n)
+                meangauss_key = 'gaussmean_' + str(n)
+                parameters.setdefault(mean_key, 0)
+                parameters.setdefault(std_key, 1)
+                parameters.setdefault(stdgauss_key, 0.2)
+                parameters.setdefault(meangauss_key, 0)
+        self.parameters = parameters
+        
+    def get_val(self, inputs):
+        if type(inputs) is not list:
+            inputs = [inputs]
+        gaussmagnitude = self.parameters['gaussmagnitude']
+        lognormmagnitude = self.parameters['lognormmagnitude']
+        terms = []
+        for i in range(self.dim):
+            mean_key = 'lognormmean_' + str(i)
+            std_key = 'lognormstd_' + str(i)
+            stdgauss_key = 'gaussstd_' + str(i)
+            meangauss_key = 'gaussmean_' + str(i)
+            mean = self.parameters[mean_key]
+            std = np.abs(self.parameters[std_key])
+            stdgauss = np.abs(self.parameters[stdgauss_key])
+            meangauss = np.abs(self.parameters[meangauss_key])
+            
+            exponent = ((np.log(inputs[i])-mean)**2)/(2*std**2)
+            coeff = 1/(inputs[i]*np.sqrt(2*np.pi*std**2))
+            gauss_term = np.exp(-1*(0.5*(inputs[i] - meangauss)/stdgauss)**2)
+            lognorm_term = coeff*np.exp(-1*exponent) + gauss_term
+            terms.append(lognormmagnitude*lognorm_term + gaussmagnitude*gauss_term)
+        # NOTE: This is *NOT* correct for ndim (it works properly for 1 dimensional)
+        if self.dim != 1:
+            raise ValueError('ndim not implimented!, ignorming dims beyond 1')
+        val = terms[0]
+        return val
+        
+    def get_gaussian_component(self):
+        gm = GaussianModel1D()
+        for param, val in self.parameters.items():
+            if param[0:5] == 'gauss':
+                gkey = param[5:]
+                gm.parameters[gkey] = val
+        return gm
+    
+    def get_lognormal_component(self):
+        lnm = LogNormalModel1D()
+        for param, val in self.parameters.items():
+            if param[0:7] == 'lognorm':
+                lkey = param[7:]
+                lnm.parameters[lkey] = val
+        return lnm
+        
+    
+class GaussianLogNormalModel1D(GaussianLogNormalModelND):
+    def __init__(self, parameters=None):
+        self.dim = 1
+        self.init_parameters(parameters)
+        
+    def fit_occurences(self, x, bins=40, plot=False, method='optimize', density=True):
+        data, edges = np.histogram(x, bins=bins, density=density)
+        inputs = [np.diff(edges) + edges[0:-1]]
+        self.fit(data, inputs, method=method)
+        
+        if plot:
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+            ax.plot(inputs[0], data, '.')
+            ax.plot(inputs[0], self.get_val(inputs), 'r')
+            
+    def get_peak(self, min_guess=0.01, max_guess=10, resolution=1000):
+        l = np.linspace(min_guess, max_guess, resolution)
+        vals = self.get_val(l)
+        index = np.argmax(vals)
+        return l[index]
         
 ######################################################################################
 # Examples
@@ -922,7 +1088,5 @@ def example_gaussianmodel2d_timevarying_movie(gm=None):
 
     ani = animation.FuncAnimation(fig, updatefig, anim_params, interval=50, blit=True)
     plt.show()
-    
-    
     
     
