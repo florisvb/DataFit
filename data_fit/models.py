@@ -281,6 +281,68 @@ class LinearModel(ModelBase):
             x = np.array(x)
         return self.parameters['slope']*x + self.parameters['intercept']
         
+
+###############################################################################################################
+# Exponential Models
+###############################################################################################################
+
+class SigmoidModel(ModelBase):
+    def __init__(self, parameters=None):
+        self.dim = 1
+        self.init_parameters(parameters)
+            
+    def init_parameters(self, parameters):
+        if parameters is None:
+            parameters = {}
+            parameters.setdefault('tao',1)
+            parameters.setdefault('gain',1)
+            parameters.setdefault('xshift',0)
+            parameters.setdefault('yshift',0)
+        self.parameters = parameters
+                
+    def get_val(self, x):
+        if type(x) is list:
+            x = np.array(x)
+        
+        tao = self.parameters['tao']
+        xshift = self.parameters['xshift']
+        yshift = self.parameters['yshift']
+        gain = self.parameters['gain']
+        val = gain*(1+np.exp(-1*np.abs(tao)*(x+xshift)))**(-1)+yshift
+        
+        return val
+        
+
+###############################################################################################################
+# Root Models
+###############################################################################################################
+
+class RootModel(ModelBase):
+    def __init__(self, parameters=None):
+        self.dim = 1
+        self.init_parameters(parameters)
+            
+    def init_parameters(self, parameters):
+        if parameters is None:
+            parameters = {}
+            parameters.setdefault('root',1)
+            parameters.setdefault('gain',1)
+            parameters.setdefault('xshift',0)
+            parameters.setdefault('yshift',0)
+        self.parameters = parameters
+                
+    def get_val(self, x):
+        if type(x) is list:
+            x = np.array(x)
+        
+        root = self.parameters['root']
+        xshift = self.parameters['xshift']
+        yshift = self.parameters['yshift']
+        gain = self.parameters['gain']
+        val = gain*(x+xshift)**(root)+yshift
+        
+        return val
+        
                 
 ###############################################################################################################
 # Gaussian Models
@@ -924,5 +986,26 @@ def example_gaussianmodel2d_timevarying_movie(gm=None):
     plt.show()
     
     
+    
+def example_sigmoid():
+    x = np.linspace(-10,10,100)
+    
+    real_parameters = {'tao': 10, 'gain': 2, 'xshift':2, 'yshift': 0}
+    real_sigmoid = SigmoidModel(real_parameters)
+    exact_data = real_sigmoid.get_val(x)
+    maxnoise = 0.1*np.max(exact_data)
+    noise = np.array([maxnoise*(np.random.random()*2-1) for i in range(len(x))])
+    noisy_data = exact_data + noise
+    
+    fit_sigmoid = SigmoidModel()
+    fit_sigmoid.fit(noisy_data, x)
+    fit_data = fit_sigmoid.get_val(x)
+    
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    
+    ax.plot(x,noisy_data,'.', color='blue')
+    ax.plot(x,exact_data,color='blue')
+    ax.plot(x,fit_data,color='red')
     
     
