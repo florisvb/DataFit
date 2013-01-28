@@ -5,6 +5,7 @@ import copy
 
 import scipy
 import scipy.linalg
+import scipy.special
 from scipy import optimize
 
 import ransac as ransac
@@ -846,6 +847,92 @@ class GaussianModel3D_TimeVarying(GaussianModelND_TimeVarying):
         
 ###
 
+###############################################################################################################
+# Von Mises Models
+###############################################################################################################
+
+class VonMisesModel1D(ModelBase):
+    def __init__(self, parameters=None):
+        self.dim = 1
+        if parameters is None:
+            self.parameters = {'location': 1, 'concentration': 1}
+        else:
+            self.parameters = parameters
+                
+    def get_val(self, x):
+        if type(x) is list:
+            x = np.array(x)
+            
+        k = self.parameters['concentration']
+        u = self.parameters['location']
+        bessel = scipy.special.j0(k)
+        val = np.exp( k*np.cos(x-u) ) / (2*np.pi*bessel)
+            
+        return val
+        
+    def fit_occurences(self, x, bins=40, plot=False, method='optimize', density=True):
+        data, edges = np.histogram(x, bins=bins, density=density)
+        inputs = [np.diff(edges) + edges[0:-1]]
+        self.fit(data, inputs, method=method)
+        
+        if plot:
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+            ax.plot(inputs[0], data, '.')
+            ax.plot(inputs[0], self.get_val(inputs), 'r')
+            
+######################################################################################
+# Sum of Von Mises
+######################################################################################
+
+class Sumof1DVonMisesModel(ModelBase):
+    def __init__(self, num_vonmises=2, parameters=None):
+        self.num_vonmises = num_vonmises
+        self.init_parameters(parameters)
+        
+    def init_parameters(self, parameters):
+        if parameters is None:
+            parameters = {}
+            for n in range(self.num_vonmises):
+                magnitude_key = 'magnitude_' + str(n)
+                location_key = 'location_' + str(n)
+                concentration_key = 'concentration_' + str(n)
+                parameters.setdefault(location_key, 0)
+                parameters.setdefault(concentration_key, 1)
+                parameters.setdefault(magnitude_key, 1)
+            parameters.setdefault('baseline', .5)
+        self.parameters = parameters
+        
+    def get_val(self, x):
+        if type(x) is list:
+            x = np.array(x)
+        vonmises_terms = []
+        for i in range(self.num_vonmises):
+            magnitude_key = 'magnitude_' + str(i)
+            location_key = 'location_' + str(i)
+            concentration_key = 'concentration_' + str(i)
+            u = self.parameters[location_key]
+            k = np.abs(self.parameters[concentration_key])
+            magnitude = np.abs(self.parameters[magnitude_key])
+            bessel = np.abs(scipy.special.j0(k))
+            val = np.exp( k*np.cos(x-u) ) / (2*np.pi*bessel)
+            vonmises_terms.append(magnitude*val)
+        vonmises_terms.append(np.ones_like(x)*np.abs(self.parameters['baseline']))
+        val = np.vstack(vonmises_terms).sum(axis=0)
+        return val
+        
+    def fit_occurences(self, x, bins=40, plot=False, method='optimize', density=True):
+        data, edges = np.histogram(x, bins=bins, density=density)
+        inputs = np.diff(edges) + edges[0:-1]
+        self.fit(data, inputs, method=method)
+        
+        if plot:
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+            print len(inputs), len(self.get_val(inputs))
+            ax.plot(inputs, data, '.')
+            ax.plot(np.array(inputs), self.get_val(inputs), 'r')
+
 ######################################################################################
 # Log Normals
 ######################################################################################
@@ -1014,6 +1101,55 @@ class GaussianLogNormalModel1D(GaussianLogNormalModelND):
         return l[index]
         
 ######################################################################################
+# Sum of Gaussians
+######################################################################################
+
+class Sumof1DGaussiansModel(ModelBase):
+    def __init__(self, num_gaussians=2, parameters=None):
+        self.num_gaussians = num_gaussians
+        self.init_parameters(parameters)
+        
+    def init_parameters(self, parameters):
+        if parameters is None:
+            parameters = {}
+            for n in range(self.num_gaussians):
+                magnitude_key = {'magnitude_' + str(n)}
+                mean_key = 'mean_' + str(n)
+                std_key = 'std_' + str(n)
+                parameters.setdefault(mean_key, 0)
+                parameters.setdefault(std_key, 1)
+                parameters.setdefault(magnitude_key, 1)
+        self.parameters = parameters
+        
+    def get_val(self, x):
+        if type(inputs) is not list:
+            inputs = [inputs]
+        gauss_terms = []
+        for i in range(self.num_gaussians):
+            magnitude_key = {'magnitude_' + str(i)}
+            mean_key = 'mean_' + str(i)
+            std_key = 'std_' + str(i)
+            mean = self.parameters[mean_key]
+            std = np.abs(self.parameters[std_key])
+            magnitude = self.parameters[magnitude_key]
+            gauss_term = (0.5*(x - mean)/std)**2
+            gauss_terms.append(magnitude*np.exp(-1*sum(gauss_term)))
+        val = np.sum(gaus_terms)
+        return val
+        
+    def fit_occurences(self, x, bins=40, plot=False, method='optimize', density=True):
+        data, edges = np.histogram(x, bins=bins, density=density)
+        inputs = [np.diff(edges) + edges[0:-1]]
+        self.fit(data, inputs, method=method)
+        
+        if plot:
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+            ax.plot(inputs[0], data, '.')
+            ax.plot(inputs[0], self.get_val(inputs), 'r')
+            
+        
+######################################################################################
 # Examples
 ######################################################################################
 
@@ -1171,4 +1307,7 @@ def example_sigmoid():
     ax.plot(x,noisy_data,'.', color='blue')
     ax.plot(x,exact_data,color='blue')
     ax.plot(x,fit_data,color='red')
+    
+    
+    
     
