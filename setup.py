@@ -6,8 +6,8 @@ setup(
     author='Floris van Breugel',
     author_email='floris@caltech.edu',
     packages = ['data_fit'],
-    license='BSD',
-    description='line and curve fitting',
+    license='See attached',
+    description='Drosophila view of the world',
     long_description=open('README.txt').read(),
 )
 

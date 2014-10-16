@@ -70,6 +70,7 @@ class ModelBase(object):
                     parameter_values.append(value)
                     parameter_names.append(name)
             optimize.leastsq(f, parameter_values, parameter_names)
+            
 
         # Linear Algebra Method            
         elif method == 'linear':
@@ -150,13 +151,15 @@ class ModelBase(object):
                 
     def show_fit(self, data=None, inputs=None, ax=None, lims=[], resolution=0.001, colornorm=None, colormap='jet', axis_slice=0, axis=2, n_inputs_to_show=50, axis_slice_threshold=0.01):
         
+        print lims
+
         if data is None:
             data = self.data
         if inputs is None:
             inputs = self.inputs
         
         if inputs is not None:
-            if type(inputs) is not list: inputs = [inputs]
+            if type(inputs) is not list and type(inputs) != np.ndarray: inputs = [inputs]
         if len(lims) != self.dim: lims = None
 
         if ax is None:
@@ -215,29 +218,37 @@ class ModelBase(object):
         # 3 dimensions
         if self.dim == 3:
             if lims is None:
-                if axis == 2:
-                    xlim = [np.min(inputs[0]), np.max(inputs[0])]
-                    ylim = [np.min(inputs[1]), np.max(inputs[1])]
-                elif axis == 1:
-                    xlim = [np.min(inputs[0]), np.max(inputs[0])]
-                    ylim = [np.min(inputs[2]), np.max(inputs[2])]
-                elif axis == 0:
-                    xlim = [np.min(inputs[1]), np.max(inputs[1])]
-                    ylim = [np.min(inputs[2]), np.max(inputs[2])]
+                xlim = [np.min(inputs[0]), np.max(inputs[0])]
+                ylim = [np.min(inputs[1]), np.max(inputs[1])]
+                zlim = [np.min(inputs[2]), np.max(inputs[2])]
             else:
                 xlim = lims[0]
                 ylim = lims[1]
+                zlim = lims[2]
                 
-            im, extent = self.get_array_2d_slice(xlim, ylim, resolution, axis=axis, axis_slice=axis_slice)
+            print xlim, ylim
+            im, extent = self.get_array_2d_slice(xlim, ylim, zlim, resolution, axis=axis, axis_slice=axis_slice)
             
             if colornorm is None:
                 norm = matplotlib.colors.Normalize(np.min(im), np.max(im))
             else:
-                norm = matplotlib.colors.Normalize(colornorm[0], colornorm[1])
-            cmap = matplotlib.cm.ScalarMappable(norm, colormap)
+                norm = matplotlib.colors.Normalize(colornorm[0], colornorm[1], clip=True)
 
             ax.imshow(im, extent=extent, origin='lower', norm=norm, cmap=colormap)
             
+            if axis==0:
+                ax.set_xlim(ylim)
+                ax.set_ylim(zlim)
+                ax.set_aspect('equal')
+            elif axis==1:
+                ax.set_xlim(xlim)
+                ax.set_ylim(zlim)
+                ax.set_aspect('equal')
+            elif axis==2:
+                ax.set_xlim(xlim)
+                ax.set_ylim(ylim)
+                ax.set_aspect('equal')
+            '''
             if inputs is not None and data is not None:
                 
                 # find inputs that are close to slice:
@@ -264,7 +275,7 @@ class ModelBase(object):
                     val = data[i]
                     color = cmap.to_rgba(val)
                     ax.plot(x,y,'o', markerfacecolor=color, markeredgewidth=2, markersize=8)
-            
+            '''
 ###############################################################################################################
 # Linear Models
 ###############################################################################################################
@@ -310,6 +321,33 @@ class SigmoidModel(ModelBase):
         yshift = self.parameters['yshift']
         gain = self.parameters['gain']
         val = gain*(1+np.exp(-1*np.abs(tao)*(x+xshift)))**(-1)+yshift
+        
+        return val
+        
+        
+###############################################################################################################
+# CDF Model
+###############################################################################################################
+
+class CDFModel(ModelBase):
+    def __init__(self, parameters=None):
+        self.dim = 1
+        self.init_parameters(parameters)
+            
+    def init_parameters(self, parameters):
+        if parameters is None:
+            parameters = {}
+            parameters.setdefault('mean',0.5)
+            parameters.setdefault('std',1)
+        self.parameters = parameters
+                
+    def get_val(self, x):
+        if type(x) is list:
+            x = np.array(x)
+        
+        mean = self.parameters['mean']
+        std = self.parameters['std']
+        val = 0.5*(1+scipy.special.erf( (x-mean) / np.sqrt(2*std**2) ) )
         
         return val
         
@@ -382,7 +420,7 @@ class GaussianModelND(ModelBase):
             std_key = 'std_' + str(i)
             mean = self.parameters[mean_key]
             std = np.abs(self.parameters[std_key])
-            gauss_term = (0.5*(inputs[i] - mean)/std)**2
+            gauss_term = 0.5*((inputs[i] - mean)/std)**2
             gauss_terms.append(gauss_term)
         val = magnitude*np.exp(-1*sum(gauss_terms))
         return val
@@ -463,6 +501,8 @@ class GaussianModel2D(GaussianModelND):
         self.parameters['std_1'] = np.mean([np.abs(std_min), np.abs(std_max)])
         
         self.parameters['magnitude'] = np.max(data)
+
+        print self.parameters
         
         return self.fit(data, inputs=inputs, plot=plot, method=method)
         
@@ -881,6 +921,12 @@ class VonMisesModel1D(ModelBase):
             ax.plot(inputs[0], data, '.')
             ax.plot(inputs[0], self.get_val(inputs), 'r')
             
+    def get_integral(self, resolution=1000):
+        x = np.linspace(-np.pi,np.pi,resolution)
+        y = self.get_val(x)
+        return np.abs(np.sum(y)/float(resolution)*np.pi*2)
+            
+            
 ######################################################################################
 # Sum of Von Mises
 ######################################################################################
@@ -918,6 +964,177 @@ class Sumof1DVonMisesModel(ModelBase):
             val = np.exp( k*np.cos(x-u) ) / (2*np.pi*bessel)
             vonmises_terms.append(magnitude*val)
         vonmises_terms.append(np.ones_like(x)*np.abs(self.parameters['baseline']))
+        val = np.vstack(vonmises_terms).sum(axis=0)
+        return val
+        
+    def fit_occurences(self, x, bins=40, plot=False, method='optimize', density=True):
+        data, edges = np.histogram(x, bins=bins, density=density)
+        inputs = np.diff(edges) + edges[0:-1]
+        self.fit(data, inputs, method=method)
+        
+        if plot:
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+            print len(inputs), len(self.get_val(inputs))
+            ax.plot(inputs, data, '.')
+            ax.plot(np.array(inputs), self.get_val(inputs), 'r')
+            
+###############################################################################################################
+# Von Mises Models with fixed location
+###############################################################################################################
+
+class VonMisesModel1DFixedPos(ModelBase):
+    def __init__(self, parameters=None):
+        self.dim = 1
+        if parameters is None:
+            self.parameters = {'concentration': 1}
+        else:
+            self.parameters = parameters
+        self.fixed_parameters = {'location': 1}
+                
+    def get_val(self, x):
+        if type(x) is list:
+            x = np.array(x)
+            
+        k = self.parameters['concentration']
+        u = self.fixed_parameters['location']
+        bessel = scipy.special.j0(k)
+        val = np.exp( k*np.cos(x-u) ) / (2*np.pi*bessel)
+            
+        return val
+        
+    def fit_occurences(self, x, bins=40, plot=False, method='optimize', density=True):
+        data, edges = np.histogram(x, bins=bins, density=density)
+        inputs = [np.diff(edges) + edges[0:-1]]
+        self.fit(data, inputs, method=method)
+        
+        if plot:
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+            ax.plot(inputs[0], data, '.')
+            ax.plot(inputs[0], self.get_val(inputs), 'r')
+            
+######################################################################################
+# Sum of 4 Von Mises with fixed locations
+######################################################################################
+
+class Sumof4x1DVonMisesModelFixedPos(ModelBase):
+    def __init__(self, num_vonmises=2, parameters=None, fixed_parameters=None):
+        self.num_vonmises = num_vonmises
+        self.init_parameters(parameters, fixed_parameters)
+        
+    def init_parameters(self, parameters, fixed_parameters):
+        if parameters is None:
+            parameters = {}
+            fixed_parameters = {}
+            for n in range(self.num_vonmises):
+                magnitude_key = 'magnitude_' + str(n)
+                location_key = 'location_' + str(n)
+                concentration_key = 'concentration_' + str(n)
+                fixed_parameters.setdefault(location_key, 0)
+                parameters.setdefault(concentration_key, 1)
+                parameters.setdefault(magnitude_key, 1)
+            fixed_parameters.setdefault('baseline', .5)
+        self.parameters = parameters
+        self.fixed_parameters = fixed_parameters
+        
+    def get_val(self, x):
+        if type(x) is list:
+            x = np.array(x)
+        vonmises_terms = []
+        for i in range(self.num_vonmises):
+        
+            magnitude_key = 'magnitude_' + str(i)
+            location_key = 'location_' + str(i)
+            concentration_key = 'concentration_' + str(i)
+            u = self.fixed_parameters[location_key]
+            
+            try:
+                k = np.abs(self.fixed_parameters[concentration_key])
+            except:  
+                k = np.abs(self.parameters[concentration_key])
+            try:
+                magnitude = np.abs(self.parameters[magnitude_key])
+            except:
+                magnitude = np.abs(self.parameters[magnitude_key])
+        
+            bessel = np.abs(scipy.special.j0(k))
+            val = np.exp( k*np.cos(x-u) ) / (2*np.pi*bessel)
+            vonmises_terms.append(magnitude*val)
+            
+            if i==1:
+                location_key = 'location_' + str(i)
+                u = -1*self.fixed_parameters[location_key]
+                bessel = np.abs(scipy.special.j0(k))
+                val = np.exp( k*np.cos(x-u) ) / (2*np.pi*bessel)
+                vonmises_terms.append(magnitude*val)
+            
+        vonmises_terms.append(np.ones_like(x)*np.abs(self.fixed_parameters['baseline']))
+        val = np.vstack(vonmises_terms).sum(axis=0)
+        return val
+        
+    def fit_occurences(self, x, bins=40, plot=False, method='optimize', density=True):
+        data, edges = np.histogram(x, bins=bins, density=density)
+        inputs = np.diff(edges) + edges[0:-1]
+        self.fit(data, inputs, method=method)
+        
+        if plot:
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+            print len(inputs), len(self.get_val(inputs))
+            ax.plot(inputs, data, '.')
+            ax.plot(np.array(inputs), self.get_val(inputs), 'r')
+            
+######################################################################################
+# Sum of 3 Von Mises with fixed locations
+######################################################################################
+
+class Sumof3x1DVonMisesModelFixedPos(ModelBase):
+    def __init__(self, num_vonmises=2, parameters=None, fixed_parameters=None):
+        self.num_vonmises = num_vonmises
+        self.init_parameters(parameters, fixed_parameters)
+        
+    def init_parameters(self, parameters, fixed_parameters):
+        if parameters is None:
+            parameters = {}
+            fixed_parameters = {}
+            for n in range(self.num_vonmises):
+                magnitude_key = 'magnitude_' + str(n)
+                location_key = 'location_' + str(n)
+                concentration_key = 'concentration_' + str(n)
+                fixed_parameters.setdefault(location_key, 0)
+                parameters.setdefault(concentration_key, 1)
+                parameters.setdefault(magnitude_key, 1)
+            fixed_parameters.setdefault('baseline', .5)
+        self.parameters = parameters
+        self.fixed_parameters = fixed_parameters
+        
+    def get_val(self, x):
+        if type(x) is list:
+            x = np.array(x)
+        vonmises_terms = []
+        for i in range(self.num_vonmises):
+        
+            magnitude_key = 'magnitude_' + str(i)
+            location_key = 'location_' + str(i)
+            concentration_key = 'concentration_' + str(i)
+            u = self.fixed_parameters[location_key]
+            
+            try:
+                k = np.abs(self.fixed_parameters[concentration_key])
+            except:  
+                k = np.abs(self.parameters[concentration_key])
+            try:
+                magnitude = np.abs(self.fixed_parameters[magnitude_key])
+            except:
+                magnitude = np.abs(self.parameters[magnitude_key])
+                
+            bessel = np.abs(scipy.special.j0(k))
+            val = np.exp( k*np.cos(x-u) ) / (2*np.pi*bessel)
+            vonmises_terms.append(magnitude*val)
+            
+        
+        vonmises_terms.append(np.ones_like(x)*np.abs(self.fixed_parameters['baseline']))
         val = np.vstack(vonmises_terms).sum(axis=0)
         return val
         
@@ -1147,7 +1364,83 @@ class Sumof1DGaussiansModel(ModelBase):
             ax = fig.add_subplot(111)
             ax.plot(inputs[0], data, '.')
             ax.plot(inputs[0], self.get_val(inputs), 'r')
-            
+
+######################################################################################
+# Turbulent mixing
+######################################################################################
+
+class TurbulentMixing(ModelBase):
+    '''
+    Based on Mark Denny's "Biology and the Mechanics of the Wave-Swept Environment", 1988, pg. 147 eqn 10.34
+    
+    '''
+    def __init__(self, dim=3, parameters=None, fixed_parameters=None):
+        self.dim = dim
+        self.init_parameters(parameters, fixed_parameters)
+        
+    def init_parameters(self, parameters, fixed_parameters):
+        if parameters is None:
+            parameters = {'Q': 68}
+            parameters.setdefault('alphay', 2)
+            parameters.setdefault('alphaz', 2)
+            parameters.setdefault('xsource', -.588)
+            parameters.setdefault('ustar', .4)
+        self.parameters = parameters
+
+        if fixed_parameters is None:
+            fixed_parameters = {'u': 0.4}
+            #fixed_parameters.setdefault('xsource', -.588)
+            fixed_parameters.setdefault('ysource', .003)
+            fixed_parameters.setdefault('zsource', .011)
+            fixed_parameters.setdefault('background_value', 400)
+        self.fixed_parameters = fixed_parameters
+        
+    def get_val(self, inputs):
+        x = inputs[0]
+        y = inputs[1]
+        z = inputs[2]
+        
+        Q = np.abs(self.parameters['Q'])
+        alphay = np.abs(self.parameters['alphay'])
+        alphaz = np.abs(self.parameters['alphaz'])
+        u = self.fixed_parameters['u']
+        ustar = np.abs(self.parameters['ustar'])
+        xsource = self.parameters['xsource']
+        ysource = self.fixed_parameters['ysource']
+        zsource = self.fixed_parameters['zsource']
+        background_value = self.fixed_parameters['background_value']
+        
+        yterm = (y-ysource)**2*u**2 / (2*alphay**2*ustar**2*(x-xsource)**2)
+        zterm = (z-zsource)**2*u**2 / (2*alphaz**2*ustar**2*(x-xsource)**2)
+
+        c = (Q*u) / (2*np.pi*alphay*alphaz*ustar**2*(x-xsource)**2) * np.exp(-1*(yterm + zterm)) + background_value
+
+        return c
+        
+    def get_array_2d_slice(self, xlim, ylim, zlim, resolution, axis=2, axis_slice=0):
+        if axis == 0:
+            y = np.arange(ylim[0], ylim[1], resolution, np.float32)
+            z = np.arange(zlim[0], zlim[1], resolution, np.float32)[:,np.newaxis]
+            x = np.ones_like(y)*axis_slice
+            inputs = [x,y,z]
+            extent = [np.min(y), np.max(y), np.min(z), np.max(z)]
+            return self.get_val(inputs), extent
+        
+        if axis == 1:
+            x = np.arange(xlim[0], xlim[1], resolution, np.float32)
+            z = np.arange(zlim[0], zlim[1], resolution, np.float32)[:,np.newaxis]
+            y = np.ones_like(x)*axis_slice
+            inputs = [x,y,z]
+            extent = [np.min(x), np.max(x), np.min(z), np.max(z)]
+            return self.get_val(inputs), extent
+        
+        if axis == 2:
+            x = np.arange(xlim[0], xlim[1], resolution, np.float32)
+            y = np.arange(ylim[0], ylim[1], resolution, np.float32)[:,np.newaxis]
+            z = np.ones_like(x)*axis_slice
+            inputs = [x,y,z]
+            extent = [np.min(x), np.max(x), np.min(y), np.max(y)]
+            return self.get_val(inputs), extent
         
 ######################################################################################
 # Examples
@@ -1307,7 +1600,5 @@ def example_sigmoid():
     ax.plot(x,noisy_data,'.', color='blue')
     ax.plot(x,exact_data,color='blue')
     ax.plot(x,fit_data,color='red')
-    
-    
     
     
