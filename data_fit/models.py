@@ -293,6 +293,35 @@ class LinearModel(ModelBase):
             x = np.array(x)
         return self.parameters['slope']*x + self.parameters['intercept']
         
+###############################################################################################################
+# Circle Model
+###############################################################################################################
+
+class CircleModel(ModelBase):
+    def __init__(self, parameters=None):
+        self.dim = 2
+        self.init_parameters(parameters)
+            
+    def init_parameters(self, parameters):
+        if parameters is None:
+            parameters = {}
+            parameters.setdefault('center_x',1)
+            parameters.setdefault('center_y',1)
+            parameters.setdefault('radius',1)
+        self.parameters = parameters
+                
+    def get_val(self, inputs):
+        if type(inputs) is list:
+            x = np.array(inputs[0])
+            y = np.array(inputs[1])
+        
+        center_x = self.parameters['center_x']
+        center_y = self.parameters['center_y']
+        radius = self.parameters['radius']
+        val = (center_x-x)**2 + (center_y-y)**2 - radius**2
+        
+        return val
+
 
 ###############################################################################################################
 # Exponential Models
@@ -1441,7 +1470,7 @@ class TurbulentMixing(ModelBase):
             inputs = [x,y,z]
             extent = [np.min(x), np.max(x), np.min(y), np.max(y)]
             return self.get_val(inputs), extent
-        
+
 ######################################################################################
 # Examples
 ######################################################################################
