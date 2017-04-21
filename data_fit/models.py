@@ -352,7 +352,166 @@ class SigmoidModel(ModelBase):
         val = gain*(1+np.exp(-1*np.abs(tao)*(x+xshift)))**(-1)+yshift
         
         return val
+
+
+class ExponentialDecay(ModelBase):
+    def __init__(self, parameters=None, fixed_parameters={'exp_base': np.exp(1)}):
+        self.dim = 1
+        self.init_parameters(parameters, fixed_parameters)
+            
+    def init_parameters(self, parameters, fixed_parameters):
+        if parameters is None:
+            parameters = {}
+            parameters.setdefault('assymptote',1)
+            parameters.setdefault('gain',1)
+            parameters.setdefault('xoffset',0)
+            parameters.setdefault('yoffset',0)
+            parameters.setdefault('I',0)
+            parameters.setdefault('S',1)
+
+        if fixed_parameters is not None:
+            for parameter, val in fixed_parameters.items():
+                try:
+                    del(parameters[parameter])
+                except:
+                    pass
+        self.parameters = parameters
+        self.fixed_parameters = fixed_parameters
+                
+    def get_val(self, x):
+        if type(x) is list:
+            x = np.array(x)
         
+        parameters = {}
+        if self.fixed_parameters is not None:
+            for p, val in self.fixed_parameters.items():
+                parameters[p] = val 
+        for p, val in self.parameters.items():
+            if p not in parameters.keys():
+                parameters[p] = val
+
+        assymptote = parameters['assymptote']
+        gain = parameters['gain']
+        xoffset = parameters['xoffset']
+        yoffset = parameters['yoffset']
+        I = parameters['I']
+        S = parameters['S']
+        exp_base = parameters['exp_base']
+
+        val = assymptote*(I-S*exp_base**(-1*(x-xoffset)*gain)) + yoffset
+        
+        return val
+
+class PowerCurve(ModelBase):
+    def __init__(self, parameters=None, fixed_parameters=None):
+        self.dim = 1
+        self.init_parameters(parameters, fixed_parameters)
+            
+    def init_parameters(self, parameters, fixed_parameters):
+        if parameters is None:
+            parameters = {}
+            parameters.setdefault('gain',1)
+            parameters.setdefault('xoffset',0)
+            parameters.setdefault('yoffset',0)
+            parameters.setdefault('k',0)
+
+        if fixed_parameters is not None:
+            for parameter, val in fixed_parameters.items():
+                del(parameters[parameter])
+        self.parameters = parameters
+        self.fixed_parameters = fixed_parameters
+                
+    def get_val(self, x):
+        if type(x) is list:
+            x = np.array(x)
+        
+        parameters = {}
+        if self.fixed_parameters is not None:
+            for p, val in self.fixed_parameters.items():
+                parameters[p] = val 
+        for p, val in self.parameters.items():
+            if p not in parameters.keys():
+                parameters[p] = val
+
+        gain = parameters['gain']
+        xoffset = parameters['xoffset']
+        yoffset = parameters['yoffset']
+        k = parameters['k']
+        
+        val = gain*(x-xoffset)**(k)+yoffset
+        
+        return val
+        
+
+class LogDecay(ModelBase):
+    def __init__(self, parameters=None, fixed_parameters=None):
+        self.dim = 1
+        self.init_parameters(parameters, fixed_parameters)
+            
+    def init_parameters(self, parameters, fixed_parameters):
+        if parameters is None:
+            parameters = {}
+            parameters.setdefault('a',1)
+            parameters.setdefault('b',1)
+            parameters.setdefault('xoffset',0)
+            parameters.setdefault('yoffset',0)
+            #fixed_parameters = {}
+            #fixed_parameters.setdefault('b', 1)
+        if fixed_parameters is not None:
+            for parameter, val in fixed_parameters.items():
+                del(parameters[parameter])
+        self.parameters = parameters
+        self.fixed_parameters = fixed_parameters
+                
+    def get_val(self, x):
+        if type(x) is list:
+            x = np.array(x)
+        
+        a = self.parameters['a']
+        if self.fixed_parameters is not None:
+            if 'b' in self.fixed_parameters: 
+                b = self.fixed_parameters['b']
+        else:
+            b = self.parameters['b']
+        xoffset = self.parameters['xoffset']
+        yoffset = self.parameters['yoffset']
+        val = a*np.log( b*(x-xoffset)+1) + yoffset
+        
+        return val
+        
+
+class BoundedExponential(ModelBase):
+    def __init__(self, parameters=None, fixed_parameters=None):
+        self.dim = 4
+        self.init_parameters(parameters, fixed_parameters)
+            
+    def init_parameters(self, parameters, fixed_parameters):
+        if parameters is None:
+            parameters = {}
+            parameters.setdefault('A',10)
+            parameters.setdefault('S',100)
+            parameters.setdefault('k',1/100000.)
+            parameters.setdefault('I',1000)
+            #fixed_parameters = {}
+            #fixed_parameters.setdefault('b', 1)
+        if fixed_parameters is not None:
+            for parameter, val in fixed_parameters.items():
+                del(parameters[parameter])
+        self.parameters = parameters
+        self.fixed_parameters = fixed_parameters
+                
+    def get_val(self, x):
+        if type(x) is list:
+            x = np.array(x)
+        
+        A = self.parameters['A']
+        S = self.parameters['S']
+        k = self.parameters['k']
+        I = self.parameters['I']
+
+        val = A*(I-S*np.exp(-k*x))
+        
+        return val
         
 ###############################################################################################################
 # CDF Model
